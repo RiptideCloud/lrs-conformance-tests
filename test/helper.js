@@ -70,7 +70,7 @@ if (!process.env.EB_NODE_COMMAND) {
     var URL_STATEMENTS = '/statements';
 
     /** HTTP header xAPI Version */
-    var XAPI_VERSION = '1.0.3';
+    var XAPI_VERSION = '2.0.0';
 
     module.exports = {
         /**
@@ -614,7 +614,7 @@ if (!process.env.EB_NODE_COMMAND) {
          */
         buildFormBody: function (content, id) {
             var body = {
-                'X-Experience-API-Version': '1.0.3',
+                'X-Experience-API-Version': '2.0.0',
                 'content': JSON.stringify(content)
             }
             if (id) {
