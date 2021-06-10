@@ -3,21 +3,23 @@ var TestRunner = require('./testRunner.js').testRunner;
 var jsonSchema = require('jsonschema');
 var validate = jsonSchema.validate;
 var colors = require('colors');
-var libpath = require('path'),
-	fs = require('fs');
+var libpath = require('path');
+var fs = require('fs');
+const specConfig = require("../specConfig");
 
 require('pretty-error').start();
 
 function clean_dir(val, dir) {
     v = val.split(',')
-    .forEach(function(d){
-        dir.push(d);
-    });
+        .forEach(function (d) {
+            dir.push(d);
+        });
     return dir;
 }
 
 program
     .version('0.0.1')
+    .option('-x, --xapiVersion [string]', '🌟 New: Version of the xAPI spec to test against.')
     .option('-e, --endpoint [url]', 'xAPI Endpoint')
     .option('-u, --authUser [string]', 'Basic Auth Username')
     .option('-p, --authPassword [string]', 'Basic Auth Password')
@@ -30,26 +32,27 @@ program
     .option('-l, --authorization_path [string]', 'Path to OAuth user authorization endpoint (relative to endpoint).')
     .option('-g, --grep [string]', 'Only run tests that match the given pattern.')
     .option('-b, --bail', 'Abort the battery if one test fails.')
-    .option('-d, --directory [value]', 'Specific directories of tests (as a comma-separated list with no spaces).', clean_dir, ['v2_0'])
+    .option('-d, --directory [value]', 'Specific directories of tests (as a comma seperated list with no spaces).', clean_dir, [...[]])
     .option('-z, --errors', 'Results log of failing tests only.')
     .parse(process.argv);
 
 var options = {
-        endpoint: program.endpoint,
-        authUser: program.authUser,
-        authPass: program.authPassword,
-        basicAuth: program.basicAuth,
-        oAuth1: program.oAuth1,
-        consumer_key: program.consumer_key,
-        consumer_secret: program.consumer_secret,
-        request_token_path: program.request_token_path,
-        auth_token_path: program.auth_token_path,
-        authorization_path: program.authorization_path,
-        grep: program.grep,
-        bail: program.bail,
-        directory: program.directory,
-		errors: program.errors
-    }
+    xapiVersion: program.xapiVersion,
+    endpoint: program.endpoint,
+    authUser: program.authUser,
+    authPass: program.authPassword,
+    basicAuth: program.basicAuth,
+    oAuth1: program.oAuth1,
+    consumer_key: program.consumer_key,
+    consumer_secret: program.consumer_secret,
+    request_token_path: program.request_token_path,
+    auth_token_path: program.auth_token_path,
+    authorization_path: program.authorization_path,
+    grep: program.grep,
+    bail: program.bail,
+    directory: program.directory,
+    errors: program.errors
+}
 
 /*
 var valid = validate(options, {
@@ -91,106 +94,142 @@ if (valid.errors.length) {
 var testRunner = null;
 
 // Catches Ctrl+C event.
-process.on('SIGINT', function() {
+process.on('SIGINT', function () {
     console.log(colors.white('Aborting tests.'));
-	testRunner.cancel();
+    testRunner.cancel();
 });
 
-
-process.on('exit', function() {
+process.on('exit', function () {
     console.log(colors.white('Closed'));
 })
 
-function start(options)
-{
-    //These are already used to fetch the access token, and are not needed by the runer
-    delete options.request_token_path ;
-    delete options.auth_token_path ;
-    delete options.authorization_path ;
+function start(options) {
+    // These are already used to fetch the access token, and are not needed by the runner.
+    delete options.request_token_path;
+    delete options.auth_token_path;
+    delete options.authorization_path;
 
-	testRunner = new TestRunner('console', null, options);
+    let endpointSpecified = options.endpoint != undefined;
+    let versionSpecified = options.xapiVersion != undefined;
+    let directorySpecified = options.directory.length > 0;
+
+    let defaultDirectory = specConfig.specToFolder[specConfig.defaultVersion]
+
+    if (!endpointSpecified) {
+        console.error(`You must specify an endpoint (-e or --endpoint) for your LRS.`);
+        console.error(`LRS endpoints typically have the form: https://lrs.net/xapi.`);
+        process.exit(1);
+    }
+
+    if (versionSpecified && directorySpecified) {
+        console.error(`Cannot specify both an xAPI Version and a Directory.`);
+        process.exit(1);
+    }
+
+    // Set up a directory based on whether or not we provided an xAPI version.
+    if (versionSpecified) {
+        let versionFolder = specConfig.specToFolder[options.xapiVersion];
+        if (versionFolder != undefined)
+            options.directory = [versionFolder];
+
+        else {
+            console.error(`Unknown version of the xAPI spec: ${options.xapiVersion}.  Unable to find appropriate test suite.`);
+            process.exit(1);
+        }
+    }
+
+    if (!versionSpecified && !directorySpecified) {
+        options.xapiVersion = specConfig.defaultVersion
+        options.directory = [defaultDirectory]
+        console.warn(`No xAPI version or manual path specified -- defaulting to ${specConfig.defaultVersion}.`);
+    }
+
+    console.log(`
+    \r\bAttempting xAPI Conformance Suite Against:
+    \r\r    xAPI Version: ${options.xapiVersion}
+    \r\r    Test Path(s): ${options.directory}
+    \r\r    LRS Endpoint: ${options.endpoint}
+    `)
+
+    testRunner = new TestRunner('console', null, options);
     testRunner.start();
 
-	var interval = setInterval(function(){
-		console.log(JSON.stringify(testRunner.summary));
-	}.bind(this), 2000);
+    var interval = setInterval(function () {
+        console.log(JSON.stringify(testRunner.summary));
+    }.bind(this), 2000);
 
-	testRunner.on('message', function(msg)
-	{
+    testRunner.on('message', function (msg) {
 
-		if(msg.action === 'log'){
-			console.log(msg.payload);
-		}
-		else if(msg.action === 'end')
-		{
-			clearInterval(interval);
-			console.log(JSON.stringify(testRunner.summary));
-			console.log(`Tests completed in ${testRunner.duration/1000} seconds`);
+        if (msg.action === 'log') {
+            console.log(msg.payload);
+        }
+        else if (msg.action === 'end') {
+            clearInterval(interval);
+            console.log(JSON.stringify(testRunner.summary));
+            console.log(`Tests completed in ${testRunner.duration / 1000} seconds`);
 
-			function removeNulls (log)
-			{
-				var temp;
+            function removeNulls(log) {
+                var temp;
 
-				if (log && log.status === 'failed')
-				{
-					temp = {
-						title: log.title,
-						name: log.name,
-						requirement: log.requirement,
-						log:log.log,
-						status: log.status,
-						error: log.error
-					};
-					var t = log.tests.map(removeNulls);
-					if (t) temp.tests = t.filter(function(v){return v != undefined});
-				}
-				return temp;
-			}
+                if (log && log.status === 'failed') {
+                    temp = {
+                        title: log.title,
+                        name: log.name,
+                        requirement: log.requirement,
+                        log: log.log,
+                        status: log.status,
+                        error: log.error
+                    };
+                    var t = log.tests.map(removeNulls);
+                    if (t) temp.tests = t.filter(function (v) { return v != undefined });
+                }
+                return temp;
+            }
 
-			// Write log to file.
-			var cleanLog = testRunner.getCleanRecord();
-			var output;
-			if (options.errors) {
-				var errOnly = {
-					name: cleanLog.name,
-					owner: cleanLog.owner,
-					flags: cleanLog.flags,
-					options: cleanLog.options,
-					rollupRule: cleanLog.rollupRule,
-					uuid: cleanLog.uuid,
-					startTime: cleanLog.startTime,
-					endTime: cleanLog.endTime,
-					duration: cleanLog.duration,
-					state: cleanLog.state,
-					summary: cleanLog.summary,
-					log: removeNulls(cleanLog.log)
-				};
-				output = JSON.stringify(errOnly, null, '    ');
-			} else {
-				output = JSON.stringify(cleanLog, null, '    ');
-			}
+            // Write log to file.
+            var cleanLog = testRunner.getCleanRecord();
+            var output;
+            if (options.errors) {
+                var errOnly = {
+                    name: cleanLog.name,
+                    owner: cleanLog.owner,
+                    flags: cleanLog.flags,
+                    options: cleanLog.options,
+                    rollupRule: cleanLog.rollupRule,
+                    uuid: cleanLog.uuid,
+                    startTime: cleanLog.startTime,
+                    endTime: cleanLog.endTime,
+                    duration: cleanLog.duration,
+                    state: cleanLog.state,
+                    summary: cleanLog.summary,
+                    log: removeNulls(cleanLog.log)
+                };
+                output = JSON.stringify(errOnly, null, '    ');
+            } else {
+                output = JSON.stringify(cleanLog, null, '    ');
+            }
 
-			var outDir = libpath.join(__dirname, '../logs');
+            var outDir = libpath.join(__dirname, '../logs');
 
             // console.log(require("util").inspect(JSON.parse(JSON.stringify(cleanLog,function(k,v){if(k=="log" && v && v.constructor == String) return undefined; return v})),{depth:10}));
 
-			fs.mkdir(outDir, 0o775, function(){
-				var outPath = libpath.join(outDir, testRunner.uuid+'.log');
-				fs.writeFile(outPath, output, (err, data) => {
-					if (err) {
-						console.log(err);
-						return process.exit(1);
-					}
-					console.log('Full run log written to', outPath);
-					return process.exit(testRunner.summary.failed);
-				});
-			});
-		}
-	});
+            fs.mkdir(outDir, 0o775, function () {
+                var outPath = libpath.join(outDir, testRunner.uuid + '.log');
+                fs.writeFile(outPath, output, (err, data) => {
+                    if (err) {
+                        console.log(err);
+                        return process.exit(1);
+                    }
+                    console.log('Full run log written to', outPath);
+                    return process.exit(testRunner.summary.failed);
+                });
+            });
+        }
+    });
 }
 
 if (!program.oAuth1)
-	start(options);
+    start(options);
 else {
 
 
@@ -198,13 +237,13 @@ else {
     config.consumer_key = options.consumer_key;
     config.consumer_secret = options.consumer_secret;
 
-    //defaults for the ADL LRS
+    // Defaults for the ADL LRS.
     config.request_token_path = options.request_token_path || '/OAuth/initiate';
-    config.auth_token_path = options.auth_token_path ||'/OAuth/token';
+    config.auth_token_path = options.auth_token_path || '/OAuth/token';
     config.authorization_path = options.authorization_path || "/../accounts/login?next=/XAPI/OAuth/authorize";
 
     config.endpoint = options.endpoint;
-    require("./OAuth.js").auth(config, function(err, oAuth) {
+    require("./OAuth.js").auth(config, function (err, oAuth) {
 
         if (err) {
             console.log(err);
@@ -226,6 +265,6 @@ else {
             verifier: options.verifier
         }
 
-		start(options);
+        start(options);
     });
 }
